@@ -2,6 +2,8 @@
 
 namespace MauticPlugin\MauticActOnBundle\Command;
 
+use Mautic\LeadBundle\Entity\LeadEventLog;
+use Mautic\LeadBundle\Entity\LeadEventLogRepository;
 use Mautic\CoreBundle\Translation\Translator;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
@@ -10,6 +12,7 @@ use Mautic\PluginBundle\Helper\IntegrationHelper;
 use Mautic\PluginBundle\Model\IntegrationEntityModel;
 use MauticPlugin\MauticRecommenderBundle\Api\Service\ApiCommands;
 use MauticPlugin\MauticRecommenderBundle\Api\Service\ApiUserItemsInteractions;
+use MauticPlugin\MauticRecommenderBundle\Entity\EventLogRepository;
 use MauticPlugin\MauticRecommenderBundle\Helper\RecommenderHelper;
 use Symfony\Bundle\FrameworkBundle\Command\ContainerAwareCommand;
 use Symfony\Component\Console\Input\InputInterface;
@@ -73,13 +76,41 @@ class PullDataToMauticCommand extends ContainerAwareCommand
                 return;
             }
         }
+
+    {
+        $logs                    = [];
+        /** @var EventLogRepository $eventLogRepository */
+        $eventLogRepository = $this->getContainer()->get('mautic.lead.repository.lead_event_log');
+        /** @var LeadModel $leadModel */
+        $leadModel = $this->getContainer()->get('mautic.lead.model.lead');
+
+
+            $log = new LeadEventLog();
+        $log->setLead($leadModel->getEntity(58))
+                ->setBundle('MauticActOnBundle')
+                ->setAction('email_sent')
+                ->setObject('segment')
+                ->setObjectId('1')
+                ->setProperties(
+                    [
+                        'object_description' => 'tester',
+                    ]
+                );
+        }
+
+        $eventLogRepository->saveEntity($log);
+        die();
+       // $eventLogRepository->saveEntities($logs);
+        //$eventLogRepository->clear();
+
+
         //$json = file_get_contents($paths['2']);
         //$items = \GuzzleHttp\json_decode($json, true);
 
-        $users = \JsonMachine\JsonMachine::fromFile($paths['2']);
-        foreach ($users as $name => $user) {
+        $users = \JsonMachine\JsonMachine::fromFile($paths['1']);
+  /*      foreach ($users as $name => $user) {
             die(print_r($user));
-        }
+        }*/
 
         $users = \JsonMachine\JsonMachine::fromFile($paths['1']);
         $i=0;
@@ -95,20 +126,35 @@ class PullDataToMauticCommand extends ContainerAwareCommand
         }
         $users = \JsonMachine\JsonMachine::fromFile($paths['1'], '/data');
 
+
+
+        $contacts = [];
+        $i = 0;
         foreach ($users as $name => $user) {
-            if (!in_array($name, ['headers', 'count', 'offset'])) {
-                foreach ($user as $u) {
-                }
-                }
-            die(print_r(array_combine($keys, $user)));
-                echo count($keys);
-                echo '-';
-                echo count($user);
-                die();
+          $contact   = array_combine($keys, $user);
+            if($i == 1)
+            die(print_r($contact));
+            $contacts[] =  $contact['ContactID'];
+    $i++;
+            if ($i > 1000) {
+                die(print_r($contacts));
+            }
             // just process $user as usual
         }
+        echo $i;
+        die();
        // die(print_r($items));
 
+        /*  $log = [
+           'bundle'    => 'plugin.mauticSocial',
+           'object'    => 'monitoring',
+           'objectId'  => $monitoring->getId(),
+           'action'    => $action,
+           'details'   => ['name' => $monitoring->getTitle()],
+           'ipAddress' => $this->container->get('mautic.helper.ip_lookup')->getIpAddressFromRequest(),
+       ];
+
+       $this->getModel('core.auditLog')->writeToLog($log);*/
         return;
 
 
