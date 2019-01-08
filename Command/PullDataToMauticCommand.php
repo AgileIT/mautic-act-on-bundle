@@ -6,10 +6,12 @@ use Mautic\LeadBundle\Entity\LeadEventLog;
 use Mautic\LeadBundle\Entity\LeadEventLogRepository;
 use Mautic\CoreBundle\Translation\Translator;
 use Mautic\LeadBundle\Entity\Lead;
+use Mautic\LeadBundle\Model\FieldModel;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\PluginBundle\Entity\IntegrationEntity;
 use Mautic\PluginBundle\Helper\IntegrationHelper;
 use Mautic\PluginBundle\Model\IntegrationEntityModel;
+use MauticPlugin\MauticActOnBundle\Command\Contacts\Contacts;
 use MauticPlugin\MauticRecommenderBundle\Api\Service\ApiCommands;
 use MauticPlugin\MauticRecommenderBundle\Api\Service\ApiUserItemsInteractions;
 use MauticPlugin\MauticRecommenderBundle\Entity\EventLogRepository;
@@ -32,13 +34,24 @@ class PullDataToMauticCommand extends ContainerAwareCommand
      */
     protected function configure()
     {
-            $this->setName('mautic:act-on:import')
+        $this->setName('mautic:act-on')
             ->setDescription('Import data from JSON Act-On export to Mautic')
-           ->addOption(
-                '--dest',
-                '-d',
+            ->addOption(
+                '--action',
+                '-a',
                 InputOption::VALUE_OPTIONAL,
-                'JSON path location of files'
+                'Action'
+            )
+            ->addOption(
+                '--from',
+                '-f',
+                InputOption::VALUE_OPTIONAL,
+                'Path to location of JSON'
+            )->addOption(
+                '--to',
+                '-t',
+                InputOption::VALUE_OPTIONAL,
+                'Path to location to export data'
             );
 
         parent::configure();
@@ -51,7 +64,19 @@ class PullDataToMauticCommand extends ContainerAwareCommand
     {
         $translator = $this->getContainer()->get('translator');
 
-        $dest = $input->getOption('dest');
+        $action = $input->getOption('action');
+
+        if (empty($action)) {
+            return $output->writeln(
+                sprintf(
+                    '<error>ERROR:</error> <info>'.$translator->trans(
+                        'mautic.plugin.act.on.command.action.param.empty'
+                    )
+                )
+            );
+        }
+
+        $dest = $input->getOption('from');
 
         if (empty($dest)) {
             return $output->writeln(
@@ -63,87 +88,82 @@ class PullDataToMauticCommand extends ContainerAwareCommand
             );
         }
 
+        $to = $input->getOption('to');
 
-        $paths = [$dest,
+        if (in_array($action, ['convert_to_csv']) && empty($to)) {
+            return $output->writeln(
+                sprintf(
+                    '<error>ERROR:</error> <info>'.$translator->trans(
+                        'mautic.plugin.act.on.command.to.param.empty'
+                    )
+                )
+            );
+        }
+
+
+        /** @var FieldModel $fieldModel */
+        $fieldModel = $this->getContainer()->get('mautic.lead.model.field');
+        $actOnId = $fieldModel->getEntityByAlias('act_on_id');
+        if (!$actOnId) {
+            return $output->writeln(
+                sprintf(
+                    '<error>ERROR:</error> <info>'.$translator->trans(
+                        'mautic.plugin.act.on.command.contact.field.not.exist'
+                    )
+                )
+            );
+        }
+
+
+        /*$paths = [
+            $dest,
             $dest.DIRECTORY_SEPARATOR.'contactLists.json',
             $dest.DIRECTORY_SEPARATOR.'allEmails.json',
             $dest.DIRECTORY_SEPARATOR.'messageLists.json',
             $dest.DIRECTORY_SEPARATOR.'formLists.json',
 
-        ];
-        foreach ($paths as $path) {
-            if (!$this->checkJsonExist($path, $output)) {
-                return;
-            }
+        ];*/
+        if (!$this->checkJsonExist($dest, $output)) {
+            return;
         }
 
-    {
-        $logs                    = [];
+        $logs = [];
         /** @var EventLogRepository $eventLogRepository */
         $eventLogRepository = $this->getContainer()->get('mautic.lead.repository.lead_event_log');
         /** @var LeadModel $leadModel */
         $leadModel = $this->getContainer()->get('mautic.lead.model.lead');
+        $em = $this->getContainer()->get('doctrine.orm.entity_manager');
 
+        /*     $log = new LeadEventLog();
+         $log->setLead($leadModel->getEntity(58))
+                 ->setBundle('MauticActOnBundle')
+                 ->setAction('email_sent')Con
+                 ->setObject('segment')
+                 ->setObjectId('1')
+                 ->setProperties(
+                     [
+                         'object_description' => 'tester',
+                     ]
+                 );
+         }
 
-            $log = new LeadEventLog();
-        $log->setLead($leadModel->getEntity(58))
-                ->setBundle('MauticActOnBundle')
-                ->setAction('email_sent')
-                ->setObject('segment')
-                ->setObjectId('1')
-                ->setProperties(
-                    [
-                        'object_description' => 'tester',
-                    ]
-                );
-        }
-
-        $eventLogRepository->saveEntity($log);
-        die();
-       // $eventLogRepository->saveEntities($logs);
+         $eventLogRepository->saveEntity($log);
+         die();*/
+        // $eventLogRepository->saveEntities($logs);
         //$eventLogRepository->clear();
 
 
         //$json = file_get_contents($paths['2']);
         //$items = \GuzzleHttp\json_decode($json, true);
 
-        $users = \JsonMachine\JsonMachine::fromFile($paths['1']);
-  /*      foreach ($users as $name => $user) {
-            die(print_r($user));
-        }*/
-
-        $users = \JsonMachine\JsonMachine::fromFile($paths['1']);
-        $i=0;
-        $keys = [];
-        foreach ($users as $name => $user) {
-            if (in_array($name, ['headers'])) {
-                foreach ($user as $u) {
-                $keys[] = $u;
-                }
-            }else{
-                break;
-            }
+        //$users = \JsonMachine\JsonMachine::fromFile($paths['1']);
+            /*  foreach ($users as $name => $user)
+                  die(print_r($user));
+              }*/
+        if (in_array($action, ['convert_to_csv'])) {
+            return new Contacts($dest, $to, $output, $translator);
         }
-        $users = \JsonMachine\JsonMachine::fromFile($paths['1'], '/data');
-
-
-
-        $contacts = [];
-        $i = 0;
-        foreach ($users as $name => $user) {
-          $contact   = array_combine($keys, $user);
-            if($i == 1)
-            die(print_r($contact));
-            $contacts[] =  $contact['ContactID'];
-    $i++;
-            if ($i > 1000) {
-                die(print_r($contacts));
-            }
-            // just process $user as usual
-        }
-        echo $i;
-        die();
-       // die(print_r($items));
+        // die(print_r($items));
 
         /*  $log = [
            'bundle'    => 'plugin.mauticSocial',
@@ -155,42 +175,6 @@ class PullDataToMauticCommand extends ContainerAwareCommand
        ];
 
        $this->getModel('core.auditLog')->writeToLog($log);*/
-        return;
-
-
-            if (empty($file)) {
-                return $output->writeln(
-                    sprintf(
-                        '<error>ERROR:</error> <info>'.$translator->trans(
-                            'mautic.plugin.recommender.command.file.required'
-                        )
-                    )
-                );
-            }
-
-            $json = file_get_contents($file);
-            if (empty($json)) {
-                return $output->writeln(
-                    sprintf(
-                        '<error>ERROR:</error> <info>'.$translator->trans(
-                            'mautic.plugin.recommender.command.file.fail',
-                            ['%file' => $file]
-                        )
-                    )
-                );
-            }
-            $items = \GuzzleHttp\json_decode($json, true);
-
-            if (empty($items) || ![$items]) {
-                return $output->writeln(
-                    sprintf(
-                        '<error>ERROR:</error> <info>'.$translator->trans(
-                            'mautic.plugin.recommender.command.json.fail',
-                            ['%file' => $file]
-                        )
-                    )
-                );
-            }
     }
 
     private function checkJsonExist($dest, $output)
@@ -202,12 +186,14 @@ class PullDataToMauticCommand extends ContainerAwareCommand
                 sprintf(
                     '<error>ERROR:</error> <info>'.$translator->trans(
                         'mautic.plugin.act.on.command.dest.not.exist',
-                        ['%path%'=>$dest]
+                        ['%path%' => $dest]
                     )
                 )
             );
+
             return false;
         }
+
         return true;
     }
 }

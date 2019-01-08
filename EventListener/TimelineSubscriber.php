@@ -57,8 +57,8 @@ class TimelineSubscriber implements EventSubscriberInterface
 
         $this->addEvents(
             $event,
-            'acton',
-            'acton',
+            'action',
+            'action',
             'fa-pie-chart',
             'MauticActOnBundle',
             'segment'

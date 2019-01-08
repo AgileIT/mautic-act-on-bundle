@@ -14,8 +14,12 @@ return [
                     'mautic.lead.repository.lead_event_log',
                     'translator',
                 ],
-
             ]
+        ],
+        'models' => [
+            'mautic.plugin.act.on.model.contacts' => [
+                'class'     => \MauticPlugin\MauticActOnBundle\Model\ContactsModel::class,
+            ],
         ],
     ],
 ];
