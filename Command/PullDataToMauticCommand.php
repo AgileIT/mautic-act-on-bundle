@@ -162,6 +162,14 @@ class PullDataToMauticCommand extends ContainerAwareCommand
               }*/
         if (in_array($action, ['convert_to_csv'])) {
             return new Contacts($dest, $to, $output, $translator);
+        }else{
+
+            $activities = \JsonMachine\JsonMachine::fromFile($dest);
+            foreach ($activities as $key=>$activity) {
+                echo $key;
+                die();
+                //die(print_r($activity));
+            }
         }
         // die(print_r($items));
 
