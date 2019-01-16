@@ -135,13 +135,7 @@ class ImportEmailsCommand extends ContainerAwareCommand
 
         $progress->finish();
 
-        // Notes
-        if (!empty($notes)) {
-            $output->writeln('');
-            $output->writeln('Notes:');
-            foreach ($notes as $note) {
-                $output->writeln($note);
-            }
-        }
+        $validators->displayNotes($notes);
+
     }
 }

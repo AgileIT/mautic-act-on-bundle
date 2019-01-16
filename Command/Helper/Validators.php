@@ -93,4 +93,20 @@ class Validators
             throw new \Exception($result);
         }
     }
+
+    /**
+     * @param array $notes
+     */
+    public function displayNotes(array $notes)
+    {
+        $output = $this->output;
+        // Notes
+        if (!empty($notes)) {
+            $output->writeln('');
+            $output->writeln('Notes:');
+            foreach ($notes as $note) {
+                $output->writeln($note);
+            }
+        }
+    }
 }

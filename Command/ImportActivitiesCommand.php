@@ -140,23 +140,21 @@ class ImportActivitiesCommand extends ContainerAwareCommand
                         continue;
                     }
 
-                    $dateAdded = $dateTimeConvert->getDateTimeFromTime($act['WhenMillis']);
-
                     $log = new LeadEventLog();
                     $log->setLead($lead)
                         ->setBundle('MauticActOnBundle')
                         ->setAction($action)
                         ->setObject('activities')
                         ->setUserName($id)
-                        ->setDateAdded($dateAdded)
+                        ->setDateAdded($dateTimeConvert->getDateTimeFromTime($act['WhenMillis']))
                         ->setProperties(
                             $act
                         );
-
-                    $eventLogRepository->saveEntity($log);
+                    $logs[] = $log;
                     $created++;
                 }
             }
+            $eventLogRepository->saveEntities($logs);
             $entityManager->clear(Lead::class);
             $entityManager->clear(LeadEventLog::class);
         }
@@ -172,14 +170,7 @@ class ImportActivitiesCommand extends ContainerAwareCommand
             )
         );
 
-        if (!empty($notes)) {
-            // Notes
-            $output->writeln('');
-            $output->writeln('Notes:');
-            foreach ($notes as $note) {
-                $output->writeln($note);
-            }
-        }
+        $validators->displayNotes($notes);
     }
 
     /**
@@ -191,7 +182,6 @@ class ImportActivitiesCommand extends ContainerAwareCommand
     private function generateHash($row, Lead $lead)
     {
         $row['lead_id'] = $lead->getId();
-
-        return json_encode($row);
+        return md5(\GuzzleHttp\json_encode($row, true));
     }
 }
