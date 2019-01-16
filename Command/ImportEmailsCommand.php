@@ -2,25 +2,12 @@
 
 namespace MauticPlugin\MauticActOnBundle\Command;
 
-use Mautic\CoreBundle\Helper\DateTimeHelper;
+use Mautic\CoreBundle\Helper\ProgressBarHelper;
 use Mautic\EmailBundle\Entity\Copy;
-use Mautic\LeadBundle\Entity\LeadEventLog;
-use Mautic\LeadBundle\Entity\LeadEventLogRepository;
-use Mautic\CoreBundle\Translation\Translator;
-use Mautic\LeadBundle\Entity\Lead;
-use Mautic\LeadBundle\Entity\LeadRepository;
-use Mautic\LeadBundle\Model\FieldModel;
-use Mautic\LeadBundle\Model\LeadModel;
-use Mautic\PluginBundle\Entity\IntegrationEntity;
-use Mautic\PluginBundle\Helper\IntegrationHelper;
-use Mautic\PluginBundle\Model\IntegrationEntityModel;
-use MauticPlugin\MauticActOnBundle\Command\Contacts\Contacts;
 use MauticPlugin\MauticActOnBundle\Command\Helper\DateTimeConvertor;
 use MauticPlugin\MauticActOnBundle\Command\Helper\Validators;
-use MauticPlugin\MauticRecommenderBundle\Api\Service\ApiCommands;
 use MauticPlugin\MauticRecommenderBundle\Api\Service\ApiUserItemsInteractions;
-use MauticPlugin\MauticRecommenderBundle\Entity\EventLogRepository;
-use MauticPlugin\MauticRecommenderBundle\Helper\RecommenderHelper;
+use Monolog\Logger;
 use Symfony\Bundle\FrameworkBundle\Command\ContainerAwareCommand;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -62,12 +49,14 @@ class ImportEmailsCommand extends ContainerAwareCommand
      */
     protected function execute(InputInterface $input, OutputInterface $output)
     {
-        $translator = $this->getContainer()->get('translator');
-        $validators = new Validators($output, $translator);
+        $translator        = $this->getContainer()->get('translator');
+        $validators        = new Validators($output, $translator);
         $dateTimeConvertor = new DateTimeConvertor();
+        /** @var Logger $logger */
+        $logger = $this->getContainer()->get('monolog.logger.mautic');
 
 
-        $dest = $input->getOption('from');
+        $dest   = $input->getOption('from');
         $emails = $input->getOption('emails');
         try {
             $validators->checkEmpty($dest);
@@ -78,29 +67,33 @@ class ImportEmailsCommand extends ContainerAwareCommand
             return;
         }
 
-        $emails         = \JsonMachine\JsonMachine::fromFile($emails, '/msgresult');
+        $emails    = \JsonMachine\JsonMachine::fromFile($emails, '/msgresult');
         $allEmails = [];
         foreach ($emails as $email) {
             $allEmails[$email['msg_id']] = $email;
         }
 
-        $emailModel = $this->getContainer()->get('mautic.email.model.email');
+        $emailModel     = $this->getContainer()->get('mautic.email.model.email');
         $copyRepository = $emailModel->getCopyRepository();
 
-        $q = $copyRepository->createQueryBuilder($copyRepository->getTableAlias())->select('ec.id');
-        $all = $q->getQuery()->getArrayResult();
+        $q      = $copyRepository->createQueryBuilder($copyRepository->getTableAlias())->select('ec.id');
+        $all    = $q->getQuery()->getArrayResult();
         $allIds = array_flip(array_column($all, 'id'));
 
-        $emailCopies         = \JsonMachine\JsonMachine::fromFile($dest);
+        $emailCopies = \JsonMachine\JsonMachine::fromFile($dest);
         //iterate over the results so the events are dispatched on each delete
         $batchSize = 20;
         $i         = 0;
-        $created         = 0;
-        $skiped         = 0;
-        $copies = [];
+        $created   = 0;
+        $skiped    = 0;
+        $copies    = [];
+        $notes     = [];
 
-        foreach ($emailCopies as $emailId=>$emailCopy) {
+        $progress = ProgressBarHelper::init($output, count($allEmails));
+        $progress->start();
+        foreach ($emailCopies as $emailId => $emailCopy) {
 
+            $progress->advance();
             // already got copy, skip it
             if (isset($allIds[$emailId])) {
                 $skiped++;
@@ -116,23 +109,39 @@ class ImportEmailsCommand extends ContainerAwareCommand
 
             if (++$i % $batchSize === 0) {
                 try {
-                    $created+= count($copies);
+                    $created += count($copies);
                     $copyRepository->saveEntities($copies);
                 } catch (\Exception $exception) {
-                    echo $exception->getMessage();
-                    die();
+                    $note    = $exception->getMessage();
+                    $notes[] = $note;
+                    $logger->log($note);
+                    continue;
                 }
                 $copies = [];
             }
         }
 
+        $output->writeln('');
+        $output->writeln('');
+
         $output->writeln(
             sprintf(
                 'DONE: <info>'.$translator->trans(
                     'mautic.plugin.act.on.command.copy.process',
-                    ['%counter%' => $created, '%skiped%'=>$skiped]
+                    ['%counter%' => $created, '%skiped%' => $skiped]
                 )
             )
         );
+
+        $progress->finish();
+
+        // Notes
+        if (!empty($notes)) {
+            $output->writeln('');
+            $output->writeln('Notes:');
+            foreach ($notes as $note) {
+                $output->writeln($note);
+            }
+        }
     }
 }

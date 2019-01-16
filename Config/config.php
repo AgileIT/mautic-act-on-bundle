@@ -19,10 +19,5 @@ return [
                 'class' => \MauticPlugin\MauticActOnBundle\EventListener\TimelineSubscriber::class,
             ],
         ],
-        'models' => [
-            'mautic.plugin.act.on.model.contacts' => [
-                'class' => \MauticPlugin\MauticActOnBundle\Model\ContactsModel::class,
-            ],
-        ],
     ],
 ];

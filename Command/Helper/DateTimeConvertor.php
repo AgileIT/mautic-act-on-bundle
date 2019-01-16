@@ -46,7 +46,9 @@ class DateTimeConvertor
      */
     public function getDateTimeFromTime($time)
     {
-        $this->dateTimeHelper->getDateTime()->setTimestamp(($time / 1000));
+        $dateTime = $this->dateTimeHelper->getDateTime();
+        $dateTime->setTimestamp(($time / 1000));
+        $this->dateTimeHelper->setDateTime($dateTime);
         return  $this->dateTimeHelper->getDateTime();
 
     }

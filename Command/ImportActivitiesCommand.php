@@ -2,25 +2,17 @@
 
 namespace MauticPlugin\MauticActOnBundle\Command;
 
+use Doctrine\ORM\EntityManager;
 use Mautic\CoreBundle\Helper\DateTimeHelper;
+use Mautic\CoreBundle\Helper\ProgressBarHelper;
 use Mautic\LeadBundle\Entity\LeadEventLog;
-use Mautic\LeadBundle\Entity\LeadEventLogRepository;
-use Mautic\CoreBundle\Translation\Translator;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Entity\LeadRepository;
-use Mautic\LeadBundle\Model\FieldModel;
 use Mautic\LeadBundle\Model\LeadModel;
-use Mautic\PluginBundle\Entity\IntegrationEntity;
-use Mautic\PluginBundle\Helper\IntegrationHelper;
-use Mautic\PluginBundle\Model\IntegrationEntityModel;
-use MauticPlugin\MauticActOnBundle\Command\Contacts\Contacts;
 use MauticPlugin\MauticActOnBundle\Command\Helper\DateTimeConvertor;
 use MauticPlugin\MauticActOnBundle\Command\Helper\Validators;
-use MauticPlugin\MauticRecommenderBundle\Api\Service\ApiCommands;
 use MauticPlugin\MauticRecommenderBundle\Api\Service\ApiUserItemsInteractions;
-use MauticPlugin\MauticRecommenderBundle\Entity\EventLogRepository;
-use MauticPlugin\MauticRecommenderBundle\Helper\RecommenderHelper;
-use MauticPlugin\MauticRecommenderBundle\Helper\SqlQuery;
+use Monolog\Logger;
 use Symfony\Bundle\FrameworkBundle\Command\ContainerAwareCommand;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -64,9 +56,12 @@ class ImportActivitiesCommand extends ContainerAwareCommand
         /** @var LeadRepository $leadRepo */
         $leadRepo           = $leadModel->getRepository();
         $eventLogRepository = $leadModel->getEventLogRepository();
+        /** @var EntityManager $entityManager */
+        $entityManager = $this->getContainer()->get('doctrine.orm.entity_manager');
+        /** @var Logger $logger */
+        $logger = $this->getContainer()->get('monolog.logger.mautic');
 
         $dest = $input->getOption('from');
-
 
         try {
             $validators->checkEmpty($dest);
@@ -79,88 +74,124 @@ class ImportActivitiesCommand extends ContainerAwareCommand
             's'  => 'email.sent',
             'os' => 'email.read',
             'fs' => 'form.submitted',
+            'b'  => 'page.hit',
         ];
 
         $activities = \JsonMachine\JsonMachine::fromFile($dest);
+        $stats      = [];
         foreach ($activities as $actOnId => $activity) {
             if (!isset($activity['activitylist'])) {
-                echo 'activitylist dont';
-                //die();
                 continue;
             }
+            $counter = 0;
+            foreach ($activity['activitylist'] as $act) {
+                if (isset($act['Verb']) && in_array($act['Verb'], array_keys($actions))) {
+                    $counter++;
+
+                }
+            }
+            $stats[$actOnId] = $counter;
+        }
+        $progress = ProgressBarHelper::init($output, count($stats));
+        $progress->start();
+        $dt         = new DateTimeHelper();
+        $activities = \JsonMachine\JsonMachine::fromFile($dest);
+        $created    = 0;
+        $skipped    = 0;
+        $notes      = [];
+        foreach ($activities as $actOnId => $activity) {
+
+            if (!isset($activity['activitylist'])) {
+                $note    = 'Contact from Act-On '.$actOnId.' don\'t have any activity logs in this batch.';
+                $notes[] = $note;
+                $logger->log('debug', $note);
+                continue;
+            }
+
             $lead = $leadRepo->getLeadsByFieldValue('act_on_id', $actOnId);
             $lead = current($lead);
             if (!$lead || !$lead instanceof Lead || !$lead->getId()) {
-                // @todo Add audit log
-                die('Lead not exists');
+                $note    = 'Contact from Act-On '.$actOnId.' not exist in Mautic';
+                $notes[] = $note;
+                $logger->log('debug', $note);
+                continue;
             }
 
             $logs = [];
             $q    = $eventLogRepository->createQueryBuilder($eventLogRepository->getTableAlias())->select(
-                'lel.userName',
-                'lel.action',
-                'lel.dateAdded'
+                'lel.properties'
             );
             $q->andWhere($q->expr()->eq('lel.lead', ':contactId'))
                 ->andWhere($q->expr()->eq('lel.bundle', ':bundle'))
                 ->setParameter('contactId', $lead->getId())
                 ->setParameter('bundle', 'MauticActOnBundle');
-            $alls     = $q->getQuery()->getArrayResult();
-            $allHashs = [];
+            $alls = array_column($q->getQuery()->getArrayResult(), 'properties');
             foreach ($alls as $all) {
-                $values = array_values($all);
-                $values[] = $lead->getId();
-                $allHashs[md5(\GuzzleHttp\json_encode($values))] = $all;
+                $allHashs[$this->generateHash($all, $lead)] = 1;
             }
-            foreach ($activity['activitylist'] as $act) {
+            $progress->advance();
+            foreach ($activity['activitylist'] as $key => $act) {
                 if (isset($act['Verb']) && in_array($act['Verb'], array_keys($actions))) {
+                    $id     = isset($act['id']) ? $act['id'] : $act['What'];
                     $action = $actions[$act['Verb']];
-
-                    $values = [];
-                    $values[] = $act['id'];
-                    $values[] = $action;
-                    $values[] = $dateTimeConvert->getDateTimeFromTime($act['WhenMillis']);
-                    $values[] = $lead->getId();
-                    $hash = md5(\GuzzleHttp\json_encode($values));
-                    if (isset($allHashs[$hash])) {
+                    // If already exist, skip
+                    if (isset($allHashs[$this->generateHash($act, $lead)])) {
+                        $skipped++;
                         continue;
                     }
+
+                    $dateAdded = $dateTimeConvert->getDateTimeFromTime($act['WhenMillis']);
 
                     $log = new LeadEventLog();
                     $log->setLead($lead)
                         ->setBundle('MauticActOnBundle')
                         ->setAction($action)
                         ->setObject('activities')
-                        ->setDateAdded($dateTimeConvert->getDateTimeFromTime($act['WhenMillis']))
-                        ->setUserName($act['id'])
+                        ->setUserName($id)
+                        ->setDateAdded($dateAdded)
                         ->setProperties(
                             $act
                         );
-                    $logs[] = $log;
+
+                    $eventLogRepository->saveEntity($log);
+                    $created++;
                 }
-                $eventLogRepository->saveEntities($logs);
             }
-            die();
+            $entityManager->clear(Lead::class);
+            $entityManager->clear(LeadEventLog::class);
+        }
+        $progress->finish();
+        $output->writeln('');
+        $output->writeln('');
+        $output->writeln(
+            sprintf(
+                '<info>DONE: '.$translator->trans(
+                    'mautic.plugin.act.on.command.event.process',
+                    ['%created%' => $created, '%skiped%' => $skipped]
+                )
+            )
+        );
+
+        if (!empty($notes)) {
+            // Notes
+            $output->writeln('');
+            $output->writeln('Notes:');
+            foreach ($notes as $note) {
+                $output->writeln($note);
+            }
         }
     }
 
-    private function checkJsonExist($dest, $output)
+    /**
+     * @param      $row
+     * @param Lead $lead
+     *
+     * @return string
+     */
+    private function generateHash($row, Lead $lead)
     {
-        $translator = $this->getContainer()->get('translator');
+        $row['lead_id'] = $lead->getId();
 
-        if (!file_exists($dest) || !is_readable($dest)) {
-            $output->writeln(
-                sprintf(
-                    '<error>ERROR:</error> <info>'.$translator->trans(
-                        'mautic.plugin.act.on.command.dest.not.exist',
-                        ['%path%' => $dest]
-                    )
-                )
-            );
-
-            return false;
-        }
-
-        return true;
+        return json_encode($row);
     }
 }

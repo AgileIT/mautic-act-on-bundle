@@ -76,10 +76,10 @@ class Contacts
     {
         $mauticContact = [];
         $allowedFields = [
-            'firstname' => 'FirstName',
-            'lastname'  => 'LastName',
             'email'     => 'E-mail Address',
             'act_on_id' => '_contact_id_',
+            //'firstname' => 'FirstName',
+            //'lastname'  => 'LastName',
             //'phone'     => 'Phone',
             //'country'   => 'Country',
         ];
@@ -91,11 +91,5 @@ class Contacts
         }
 
         return $mauticContact;
-    }
-
-
-    public function get()
-    {
-
     }
 }
