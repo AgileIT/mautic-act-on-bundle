@@ -140,13 +140,16 @@ class ImportActivitiesCommand extends ContainerAwareCommand
                         continue;
                     }
 
+                    $dateTime =$dateTimeConvert->getDateTimeFromTime($act['WhenMillis']);
+                    $dt = clone $dateTime;
+
                     $log = new LeadEventLog();
                     $log->setLead($lead)
                         ->setBundle('MauticActOnBundle')
                         ->setAction($action)
                         ->setObject('activities')
                         ->setUserName($id)
-                        ->setDateAdded($dateTimeConvert->getDateTimeFromTime($act['WhenMillis']))
+                        ->setDateAdded($dt)
                         ->setProperties(
                             $act
                         );
